@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: datapilot-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: datapilot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./database/init_ro_user.sql:/docker-entrypoint-initdb.d/02_init_ro_user.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d datapilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datapilot_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: datapilot-backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres_secure_password@db:5432/datapilot
+      READONLY_DATABASE_URL: postgresql://datapilot_ro:datapilot_ro_pass@db:5432/datapilot
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      MAX_RESULT_ROWS: 100
+      QUERY_TIMEOUT_SECONDS: 10
+      MAX_SQL_CORRECTION_ATTEMPTS: 3
+    ports:
+      - "8000:8000"
+    networks:
+      - datapilot_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: datapilot-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks:
+      - datapilot_net
+
+volumes:
+  pg_data:
+
+networks:
+  datapilot_net:
+    driver: bridge
